@@ -6,6 +6,7 @@ struct Material {
   float emission_strength;
   float alpha;
   uint material_type;
+  float refraction_rate;
 };
 
 #define MATERIAL_TYPE_LAMBERTIAN 0
@@ -13,3 +14,5 @@ struct Material {
 #define MATERIAL_TYPE_TRANSMISSIVE 2
 #define MATERIAL_TYPE_PRINCIPLED 3
 #define MATERIAL_TYPE_EMISSION 4
+
+#define DEFAULT_REFRACTION_RATE 1.3

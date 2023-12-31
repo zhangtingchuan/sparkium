@@ -22,7 +22,8 @@ struct Material {
   float emission_strength{1.0f};
   float alpha{1.0f};
   MaterialType material_type{MATERIAL_TYPE_LAMBERTIAN};
-  float reserve[2]{};
+  float refraction_rate;
+  float reserve[1]{};
   Material() = default;
   explicit Material(const glm::vec3 &albedo);
   Material(Scene *scene, const tinyxml2::XMLElement *material_element);

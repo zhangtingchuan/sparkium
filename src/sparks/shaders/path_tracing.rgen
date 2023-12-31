@@ -67,6 +67,13 @@ void TraceRay(vec3 origin, vec3 direction) {
   hit_record = GetHitRecord(ray_payload, origin, direction);
 }
 
+vec3 RandomDirection() {
+  float theta = acos(1.0 - 2.0 * RandomFloat());
+  float phi = RandomFloat() * 2 * PI;
+  vec3 direction = vec3(cos(theta), sin(theta) * cos(phi), sin(theta) * sin(phi));
+  return direction;
+}
+
 vec3 RandomDirectionLambertian(vec3 normal) {
   vec3 component1 = vec3(0.0);
   if (length(normal.xy) >= 0.7)
@@ -80,30 +87,71 @@ vec3 RandomDirectionLambertian(vec3 normal) {
   return direction;
 }
 
-vec3 UpdateDirection(uint material_type, vec3 old_direction) {
-  vec3 direction = vec3(1.0, 0.0, 0.0);
-  if (material_type == MATERIAL_TYPE_SPECULAR) {
-    vec3 normal = hit_record.normal;
-    direction = old_direction - 2 * dot(normal, old_direction) * normal;
-  } else if (material_type == MATERIAL_TYPE_LAMBERTIAN) {
-    vec3 normal = hit_record.normal;
-    direction = RandomDirectionLambertian(normal);
-  } else if (material_type == MATERIAL_TYPE_TRANSMISSIVE) {
-    vec3 normal = hit_record.normal;
-    vec3 direction1 = old_direction - 2 * dot(normal, old_direction) * normal;
-    vec3 direction2 = old_direction;
-    if (RandomFloat() > 0.5)
-      direction = direction1;
-    else
-      direction = direction2;
+float MIS_weight(vec3 origin, vec3, direction) {
+  ObjectInfo object_info = object_infos[ray_payload.object_id];
+  Vertex v0 = GetVertex(
+      object_info.vertex_offset +
+      indices[object_info.index_offset + ray_payload.primitive_id * 3 + 0]);
+  Vertex v1 = GetVertex(
+      object_info.vertex_offset +
+      indices[object_info.index_offset + ray_payload.primitive_id * 3 + 1]);
+  Vertex v2 = GetVertex(
+      object_info.vertex_offset +
+      indices[object_info.index_offset + ray_payload.primitive_id * 3 + 2]);
+  vec3 p0 = v0.position;
+  vec3 p1 = v1.position;
+  vec3 p2 = v2.position;
+  float a = length(cross(p1 - p0, p2 - p0)) * 0.5;
+  float distance = length(hit_record.position - origin);
+  float pdf = distance * distance / abs(dot(hit_record.normal, direction)) / a;
+  float pdf2 = 0.5 / PI;
+  return pdf * pdf / (pdf * pdf + pdf2 * pdf2);
+}
+
+vec3 LightSampling(vec3 origin, vec3 normal) {
+  ObjectInfo object_info = object_infos[0];
+  Material material_emission = materials[0];
+  int num_faces = (object_infos[1].index_offset - object_infos[0].index_offset) / 3;
+  int random_index = int(RandomFloat() * num_faces);
+  Vertex v0 = GetVertex(object_info.vertex_offset + indices[object_info.index_offset + random_index * 3 + 0]);
+  Vertex v1 = GetVertex(object_info.vertex_offset + indices[object_info.index_offset + random_index * 3 + 1]);
+  Vertex v2 = GetVertex(object_info.vertex_offset + indices[object_info.index_offset + random_index * 3 + 2]);
+  vec3 p0 = v0.position;
+  vec3 p1 = v1.position;
+  vec3 p2 = v2.position;
+  float x_length = RandomFloat();
+  float y_length = RandomFloat();
+  if (x_length + y_length > 1) {
+    x_length = 1 - x_length;
+    y_length = 1 - y_length;
   }
-  return direction;
+  float a = length(cross(p1 - p0, p2 - p0)) * 0.5;
+  
+  vec3 random_position = v0.position * (1 - x - y) + v1.position * x + v2.position * y;
+  vec3 direction = normalize(random_position - origin);
+  TraceRay(origin, direction);
+  if (ray_payload.object_id == 0 && ray_payload.primitive_id == 0) {
+    float light = material.emission * abs(dot(normal, direction)) * abs(dot(hit_record.normal, direction))
+                * a / ((random_position - origin) * (random_position - origin))
+                * (1 / (PI * 2))
+                * MIS_weight(origin, direction);
+    return light;
+  } else return 0.0;
+}
+
+vec3 AntiAliasingSample(int sample_time) {
+  // MSAA
+  int t = sample_time % 16;
+  float dx = 0.25 * (sample_time / 4) + 0.125;
+  float dy = 0.25 * (sample_time % 4) + 0.125;
+  return vec2(dx, dy);
 }
 
 vec3 SampleRay(vec3 origin, vec3 direction) {
   vec3 radiance = vec3(0.0);
   vec3 throughput = vec3(1.0);
   float RR_probability = 0.9;
+  int previous_material = MATERIAL_TYPE_EMISSION;
   for (int b = 0; b <= guo.num_bounces; b++) {
     if (b >= guo.num_bounces || RandomFloat() > RR_probability) {
       throughput = vec3(0.0);
@@ -121,13 +169,50 @@ vec3 SampleRay(vec3 origin, vec3 direction) {
       Material material = materials[hit_record.hit_entity_id];
       if (material.material_type == MATERIAL_TYPE_EMISSION) {
         throughput *= material.emission * material.emission_strength;
-        radiance += throughput;
+        if (previous_material != MATERIAL_TYPE_LAMBERTIAN) radiance += throughput;
+        else radiance += throughput * (1 - MIS_weight(origin, direction));
         break;
       } else {
         throughput *= material.albedo_color *
                       vec3(texture(texture_samplers[material.albedo_texture_id],
                                    hit_record.tex_coord));
+        previous_material = material.material_type;
         origin = hit_record.position;
+        vec3 old_direction = direction;
+        if (material.material_type == MATERIAL_TYPE_TRANSMISSIVE) {
+          float inv_refraction_rate = DEFAULT_REFRACTION_RATE;
+          vec3 normal = hit_record.normal;
+          float theta1 = dot(normal, old_direction);
+          if (theta1 < 0) inv_refraction_rate = 1 / inv_refraction_rate;
+          vec3 direction1 = old_direction - 2 * dot(normal, old_direction) * normal;
+          vec3 direction2 = old_direction;
+          float theta2 = sqrt(1 - theta1 * theta1) * inv_refraction_rate;
+          if (theta2 > 1) direction = direction1;
+          else {
+            float cos_theta2 = sqrt(1 - theta2 - theta2);
+            vec3 component1 = normal;
+            if (theta1 < 0) component1 = -normal;
+            vec3 component2 = cross(normalize(cross(normal, old_direction)), normal);
+            direction2 = normalize(cos_theta2 * component1 + theta2 * component2;)
+            float r0 = (1 - inv_refraction_rate) / (1 + inv_refraction_rate);
+            r0 = r0 * r0;
+            float reflectance = r0 + (1 - r0) * pow(1 - abs(dot(old_direction, normal)), 5);
+            if (RandomFloat() > reflectance){
+              direction = direction1;
+            } else {
+              direction = direction2;
+            }
+          }
+        } else if (material.material_type == MATERIAL_TYPE_SPECULAR) {
+          vec3 normal = hit_record.normal;
+          direction = old_direction - 2 * dot(normal, old_direction) * normal;
+        } else if (material.material_type == MATERIAL_TYPE_LAMBERTIAN) {
+          vec3 normal = hit_record.normal;
+          radiance += LighteSampling(origin, normal, old_direction) * throughput;
+          direction = RandomDirectionLambertian(normal);
+        } else {
+          direction = old_direction;
+        }
         direction = UpdateDirection(material.material_type, direction);
         // radiance += throughput * guo.envmap_minor_color;
         // throughput *= max(dot(direction, hit_record.normal), 0.0) * 2.0;
@@ -142,6 +227,12 @@ vec3 SampleRay(vec3 origin, vec3 direction) {
   return radiance;
 }
 
+// TODO
+// principled bsdf
+// functional texture mapping
+// motion blur
+// depth of field
+
 void main() {
   const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
   const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
@@ -150,11 +241,13 @@ void main() {
   mat4 camera_to_world = inverse(guo.camera);
   mat4 screen_to_camera = inverse(guo.projection);
 
+  for (int i = 0; )
   for (int i = 0; i < guo.num_samples; i++) {
     InitRandomSeed(uint(pixelCenter.x), uint(pixelCenter.y),
                    guo.accumulated_sample + i);
+    vec2 d0 = d + AntiAliasingSample(i);
     vec4 origin = camera_to_world * vec4(0, 0, 0, 1);
-    vec4 target = screen_to_camera * vec4(d.x, d.y, 1, 1);
+    vec4 target = screen_to_camera * vec4(d0.x, d0.y, 1, 1);
     vec4 direction = camera_to_world * vec4(normalize(target.xyz), 0);
 
     imageStore(accumulation_color, ivec2(gl_LaunchIDEXT.xy),
