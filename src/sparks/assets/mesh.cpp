@@ -349,6 +349,10 @@ Mesh::Mesh(const tinyxml2::XMLElement *element) {
       auto v2 = vertices[indices[i + 2]];
       auto geom_normal = glm::normalize(
           glm::cross(v1.position - v0.position, v2.position - v0.position));
+      auto tangent = glm::vec3(0.0);
+      if (glm::length(v0.tex_coord - v1.tex_coord) >= 0.00001)
+        tangent = (glm::mat3x3{v0.position, v1.position, v2.position} * glm::inverse(glm::mat3x3{
+                        v0.tex_coord[0], v0.tex_coord[1], 1, v1.tex_coord[0], v1.tex_coord[1], 1, v2.tex_coord[0], v2.tex_coord[1], 1}))[0];
       if (glm::length(v0.normal) < 0.5f) {
         v0.normal = geom_normal;
       }
@@ -358,6 +362,9 @@ Mesh::Mesh(const tinyxml2::XMLElement *element) {
       if (glm::length(v2.normal) < 0.5f) {
         v2.normal = geom_normal;
       }
+      v0.tangent += tangent;
+      v1.tangent += tangent;
+      v2.tangent += tangent;
       vertices_.push_back(v0);
       vertices_.push_back(v1);
       vertices_.push_back(v2);

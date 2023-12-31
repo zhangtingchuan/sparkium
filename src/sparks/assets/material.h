@@ -23,7 +23,8 @@ struct Material {
   float alpha{1.0f};
   MaterialType material_type{MATERIAL_TYPE_LAMBERTIAN};
   float refraction_rate;
-  float reserve[1]{};
+  int normal_texture_id{-1};
+  // float reserve[4]{};
   Material() = default;
   explicit Material(const glm::vec3 &albedo);
   Material(Scene *scene, const tinyxml2::XMLElement *material_element);

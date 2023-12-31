@@ -39,6 +39,16 @@ Material::Material(Scene *scene, const tinyxml2::XMLElement *material_element)
     }
   }
 
+  child_element = material_element->FirstChildElement("normal_texture");
+  if (child_element) {
+    std::string path = child_element->FindAttribute("value")->Value();
+    Texture normal_texture(1, 1);
+    if (Texture::Load(path, normal_texture)) {
+      normal_texture_id =
+          scene->AddTexture(normal_texture, PathToFilename(path));
+    }
+  }
+
   child_element = material_element->FirstChildElement("emission");
   if (child_element) {
     emission = StringToVec3(child_element->FindAttribute("value")->Value());
@@ -57,6 +67,11 @@ Material::Material(Scene *scene, const tinyxml2::XMLElement *material_element)
 
   material_type =
       material_name_map[material_element->FindAttribute("type")->Value()];
+
+  child_element = material_element->FirstChildElement("refraction_rate");
+  if (child_element) {
+    refraction_rate = std::stof(child_element->FindAttribute("value")->Value());
+  }
 }
 
 Material::Material(const glm::vec3 &albedo) : Material() {
