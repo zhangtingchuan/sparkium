@@ -40,6 +40,27 @@ layout(location = 0) rayPayloadEXT RayPayload ray_payload;
 #include "random.glsl"
 // clang-format on
 
+float clampdot(vec3 v1, vec3 v2) {
+  return clamp(dot(v1, v2), -1, 1);
+}
+
+float pow2(float v) {
+  return v * v;
+}
+
+float pow5(float v) {
+  float v2 = v * v;
+  return v2 * v2 * v;
+}
+
+// float mix(float f0, float f1, float lambda) {
+//   return lambda * f0 + (1.0 - lambda) * f1;
+// }
+
+// vec3 vmix(vec3 v0, vec3 v1, float lambda) {
+//   return lambda * v0 + (1.0 - lambda) * v1;
+// }
+
 vec3 SampleEnvmap(vec3 direction) {
   float x = guo.envmap_offset;
   float y = acos(direction.y) * INV_PI;
@@ -87,8 +108,293 @@ vec3 RandomDirectionLambertian(vec3 normal) {
   return direction;
 }
 
-float MIS_weight(vec3 origin, vec3 direction) {
-  // return 0.0;
+// BSDF pdf
+vec3 BSDF(vec3 v_in, vec3 v_out, vec3 normal, vec3 x, vec3 color, Material material) {
+  // return vec3(0.0);
+  vec3 y = normalize(cross(normal, x));
+  // params
+  float anisotrophic = material.anisotrophic;
+  float clearcoat = material.clearcoat;
+  float clearcoat_gloss = material.clearcoat_gloss;
+  float metallic = material.metallic;
+  float roughness = material.roughness;
+  float sheen = material.sheen;
+  float sheen_tint = material.sheen_tint;
+  float specular = material.specular;
+  float specular_tint = material.specular_tint;
+  float specular_transmission = material.specular_transmission;
+  float subsurface = material.subsurface;
+
+  // predefine
+  vec3 F = vec3(0.0);
+  float D = 0.0, G = 0.0;
+  float eta = material.refraction_rate;
+  vec3 f_clearcoat = vec3(0.0);
+  vec3 f_diffuse = vec3(0.0);
+  vec3 f_glass = vec3(0.0);
+  vec3 f_metal = vec3(0.0);
+  vec3 f_sheen = vec3(0.0);
+
+  float cos_nl = clampdot(normal, v_in);
+  float cos_nv = clampdot(normal, v_out);
+  float r0 = pow2((1 - eta) / (1 + eta));
+  float aspect = sqrt(1 - 0.9 * anisotrophic);
+  float alpha_x = max(0.0001, roughness * roughness / aspect);
+  float alpha_y = max(0.0001, roughness * roughness * aspect);
+  if (cos_nl > 0 && cos_nv > 0) {
+    vec3 h = normalize(v_in + v_out);
+    float cos_nh = clampdot(normal, h);
+    float cos_lh = clampdot(v_in, h);
+    float cos_xh = clampdot(x, h);
+    float cos_yh = clampdot(y, h);
+    float luminance = dot(vec3(0.3, 0.6, 0.1), color);
+    vec3 ctint = luminance > 0.0 ? color / luminance : vec3(1.0);
+    // diffuse
+    float fss90 = roughness * cos_lh * cos_lh;
+    float fd90 = 0.5 + 2.0 * fss90;
+    float f_nl = pow5(1 - abs(cos_nl));
+    float f_nv = pow5(1 - abs(cos_nv));
+    float f_base = mix(1.0, fd90, f_nl) * mix(1.0, fd90, f_nv) * abs(cos_nv) * INV_PI;
+    float f_subsurface = (mix(1.0, fss90, f_nl) * mix(1.0, fss90, f_nv) * (1.0 / (abs(cos_nl) + abs(cos_nv)) - 0.5) + 0.5) * abs(cos_nv) * 1.25 * INV_PI;
+    f_diffuse = mix(f_base, f_subsurface, subsurface) * color;
+    // metal
+    float f_hv = pow5(1 - abs(cos_lh));
+    vec3 c0 = mix(specular * r0 * mix(vec3(1.0), ctint, specular_tint), color, metallic);
+
+    F = mix(c0, vec3(1.0), f_hv);
+    D = 1 / (PI * alpha_x * alpha_y * pow2(pow2(cos_xh / alpha_x) + pow2(cos_yh / alpha_y) + cos_nh * cos_nh));
+    G = cos_nl * cos_nv / ((cos_nl + sqrt(cos_nl * cos_nl + pow2(clampdot(v_in, x) * alpha_x) + pow2(clampdot(v_in, y) * alpha_y)))
+          * (cos_nv + sqrt(cos_nv * cos_nv + pow2(clampdot(v_out, x) * alpha_x) + pow2(clampdot(v_out, y) * alpha_y))));// *4
+    f_metal = F * D * G / abs(cos_nl);
+    // clearcoat
+    float alpha_g2 = pow2(mix(0.1, 0.001, clearcoat_gloss));
+    F = mix(r0, 1.0, f_hv) * vec3(1.0);
+    D = (alpha_g2 - 1) / (PI * log(alpha_g2) * (1 + (alpha_g2 - 1) * cos_nh * cos_nh));
+    G = 1 / ((cos_nl + sqrt(cos_nl * cos_nl * 0.9375 + 0.0625)) * (cos_nv + sqrt(cos_nv * cos_nv * 0.9375 + 0.0625)));// *4
+    f_clearcoat = F * D * G / abs(cos_nl);
+    // sheen
+    vec3 csheen = mix(vec3(1.0), ctint, sheen_tint);
+    f_sheen = csheen * f_hv * abs(cos_nv);
+  }
+  // glass
+  vec3 h = -normalize(cos_nl > 0 ? v_in + eta * v_out : eta * v_in + v_out);
+  if (cos_nl * cos_nv > 0) h = normalize(v_in + v_out);
+  float cos_nh = clampdot(normal, h);
+  float cos_lh = clampdot(v_in, h);
+  float cos_vh = clampdot(v_out, h);
+  float cos_xh = clampdot(x, h);
+  float cos_yh = clampdot(y, h);
+  float Fg = 0.5 * (pow2((cos_lh - eta * cos_vh) / (cos_lh + eta * cos_vh)) + pow2((eta * cos_lh - cos_vh) / (eta * cos_lh + cos_vh)));
+  // float Fg = pow2(1 + eta) / pow2(1 - eta);
+  D = 1 / (PI * alpha_x * alpha_y * pow2(pow2(cos_xh / alpha_x) + pow2(cos_yh / alpha_y) + cos_nh * cos_nh));
+  G = abs(cos_nl * cos_nv) / ((abs(cos_nl) + sqrt(cos_nl * cos_nl + pow2(clampdot(v_in, x) * alpha_x) + pow2(clampdot(v_in, y) * alpha_y)))
+        * (abs(cos_nv) + sqrt(cos_nv * cos_nv + pow2(clampdot(v_out, x) * alpha_x) + pow2(clampdot(v_out, y) * alpha_y))));// *4
+  f_glass = cos_nl * cos_nv > 0 ? color * Fg * D * G / abs(cos_nl)
+                                : sqrt(color) * (1 - Fg) * D * G * abs(cos_lh * cos_vh) / (abs(cos_nl) * pow2(cos_lh + eta * cos_vh)) * 4.0;
+  // combine
+  float v_diffuse = (1 - specular_transmission) * (1 - metallic);
+  float v_sheen = (1 - metallic) * sheen;
+  float v_metal = (1 - specular_transmission * (1 - metallic));
+  float v_clearcoat = 0.25 * clearcoat;
+  float v_glass = (1 - metallic) * specular_transmission;
+
+  // v_diffuse = 0;
+  // v_sheen = 0;
+  // v_clearcoat = 0;
+  // v_glass = 0;
+  // f_diffuse = vec3(0.0);
+  // f_sheen = vec3(0.0);
+  // f_clearcoat = vec3(0.0);
+  // f_glass = vec3(0.0);
+
+
+  vec3 f = v_diffuse * f_diffuse
+         + v_sheen * f_sheen
+         + v_metal * f_metal
+         + v_clearcoat * f_clearcoat
+         + v_glass * f_glass;
+  return f / (v_diffuse + v_sheen + v_metal + v_clearcoat + v_glass);
+}
+
+// BSDF sampling
+vec3 RandomDirectionBSDF(vec3 v_in, vec3 normal, vec3 x, vec3 color, Material material) {
+  vec3 direction = vec3(0.0);
+  vec3 multiplier = vec3(0.0);
+  vec3 y = normalize(cross(normal, x));
+  // params
+  float anisotrophic = material.anisotrophic;
+  float clearcoat = material.clearcoat;
+  float clearcoat_gloss = material.clearcoat_gloss;
+  float metallic = material.metallic;
+  float roughness = material.roughness;
+  float sheen = material.sheen;
+  float sheen_tint = material.sheen_tint;
+  float specular = material.specular;
+  float specular_tint = material.specular_tint;
+  float specular_transmission = material.specular_transmission;
+  float subsurface = material.subsurface;
+
+  float v_diffuse = (1 - specular_transmission) * (1 - metallic);
+  float v_metal = (1 - specular_transmission * (1 - metallic));
+  float v_clearcoat = 0.25 * clearcoat;
+  float v_glass = (1 - metallic) * specular_transmission;
+
+  // v_diffuse = 0;
+  // v_clearcoat = 0;
+  // v_glass = 0;
+
+  float v_sum = v_diffuse + v_metal + v_clearcoat + v_glass;
+  float random_index = RandomFloat() * v_sum;
+  if (random_index < v_diffuse) {
+    direction = RandomDirectionLambertian(normal);
+  } else if (random_index < v_diffuse + v_metal) {
+    float aspect = sqrt(1 - 0.9 * anisotrophic);
+    float alpha_x = max(0.0001, roughness * roughness / aspect);
+    float alpha_y = max(0.0001, roughness * roughness * aspect);
+
+    vec3 local_in = vec3(clampdot(v_in, x), clampdot(v_in, y), clampdot(v_in, normal));
+    vec3 sphere_in = normalize(local_in * vec3(alpha_x, alpha_y, 1.0));
+    // if (sphere_in[2] < 0) sphere_in *= -1;
+    vec2 s_circle = RandomInCircle();
+    s_circle[1] = mix(sqrt(1.0 - pow2(s_circle[0])), s_circle[1], 0.5 * (1 + sphere_in[2]));
+
+    vec3 component1 = vec3(0.0);
+    if (length(sphere_in.xz) > 0.0000001)
+      component1 = normalize(vec3(-sphere_in.z, 0.0, sphere_in.x));
+    else
+      component1 = normalize(vec3(1.0, 0.0, 0.0));
+    vec3 component2 = normalize(cross(sphere_in, component1));
+    vec3 h = s_circle[0] * component1 + s_circle[1] * component2 + sqrt(max(0.0, 1.0 - pow2(s_circle[0]) - pow2(s_circle[1]))) * sphere_in;
+    h = normalize(vec3(h[0] * alpha_x, h[1] * alpha_y, max(h[2], 0.0)));
+    h = normalize(h[0] * x + h[1] * y + h[2] * normal);
+    direction = normalize(2 * h * dot(v_in, h) - v_in);
+  } else if (random_index < v_diffuse + v_metal + v_clearcoat) {
+    float alpha_g = mix(0.1, 0.001, clearcoat_gloss);
+    float cos_phi = sqrt((1 - pow(alpha_g, 2.0 * (1.0 - RandomFloat()))) / (1.0 - alpha_g * alpha_g));
+    float sin_phi = sqrt(1 - cos_phi * cos_phi);
+    float theta = RandomFloat() * PI * 2.0;
+    vec3 h = normalize(vec3(sin_phi * cos(theta), sin_phi * sin(theta), cos_phi));
+    h = normalize(x * h[0] + y * h[1] + normal * h[2]);
+    direction = normalize(2 * h * dot(v_in, h) - v_in);
+  } else {
+    float aspect = sqrt(1 - 0.9 * anisotrophic);
+    float alpha_x = max(0.0001, roughness * roughness / aspect);
+    float alpha_y = max(0.0001, roughness * roughness * aspect);
+
+    vec3 local_in = vec3(clampdot(v_in, x), clampdot(v_in, y), clampdot(v_in, normal));
+    vec3 sphere_in = normalize(local_in * vec3(alpha_x, alpha_y, 1.0));
+    vec2 s_circle = RandomInCircle();
+    s_circle[1] = mix(sqrt(1.0 - pow2(s_circle[0])), s_circle[1], 0.5 * (1 + sphere_in[2]));
+
+    vec3 component1 = vec3(0.0);
+    if (length(sphere_in.xy) >= 0.7)
+      component1 = normalize(vec3(sphere_in.y, -sphere_in.x, 0.0));
+    else
+      component1 = normalize(vec3(0.0, -sphere_in.z, sphere_in.y));
+    vec3 component2 = normalize(cross(sphere_in, component1));
+    vec3 h = s_circle[0] * component1 + s_circle[1] * component2 + sqrt(1.0 - pow2(s_circle[0]) - pow2(s_circle[1])) * sphere_in;
+    h = normalize(vec3(h[0] * alpha_x, h[1] * alpha_y, max(h[2], 0.0)));
+    h = normalize(h[0] * x + h[1] * y + h[2] * normal);
+    float eta = material.refraction_rate;
+    if (dot(normal, v_in) < 0.0) eta = 1.0 / eta;
+    float cos_lh = clampdot(v_in, h);
+    if ((1.0 - cos_lh * cos_lh) >= eta * eta) direction = normalize(2 * h * dot(v_in, h) - v_in);
+    else {
+      float cos_vh = sqrt(1.0 - (1.0 - cos_lh * cos_lh) / (eta * eta));
+      float reflectance = 0.5 * (pow2((cos_lh - cos_vh * eta) / (cos_lh + cos_vh * eta)) + pow2((cos_lh * eta - cos_vh) / (cos_lh * eta + cos_vh)));
+      if (RandomFloat() < reflectance) direction = normalize(2 * h * dot(v_in, h) - v_in);
+      else {
+        vec3 component1 = normalize(cos_lh * h - v_in);
+        direction = normalize(component1 * sqrt(1.0 - cos_vh * cos_vh) + h * cos_vh);
+      }
+    }
+  }
+  return direction;
+}
+
+// BSDF sampling pdf
+float BSDFSampling_pdf(vec3 v_in, vec3 v_out, vec3 normal, vec3 x, vec3 color, Material material) {
+  // return vec3(0.0);
+  vec3 y = normalize(cross(normal, x));
+  // params
+  float anisotrophic = material.anisotrophic;
+  float clearcoat = material.clearcoat;
+  float clearcoat_gloss = material.clearcoat_gloss;
+  float metallic = material.metallic;
+  float roughness = material.roughness;
+  float sheen = material.sheen;
+  float sheen_tint = material.sheen_tint;
+  float specular = material.specular;
+  float specular_tint = material.specular_tint;
+  float specular_transmission = material.specular_transmission;
+  float subsurface = material.subsurface;
+
+  // predefine
+  float D = 0.0, G = 0.0;
+  float eta = material.refraction_rate;
+  float f_clearcoat = 0.0;
+  float f_diffuse = 0.0;
+  float f_glass = 0.0;
+  float f_metal = 0.0;
+
+  float cos_nl = clampdot(normal, v_in);
+  float cos_nv = clampdot(normal, v_out);
+  float r0 = pow2((1 - eta) / (1 + eta));
+  float aspect = sqrt(1 - 0.9 * anisotrophic);
+  float alpha_x = max(0.0001, roughness * roughness / aspect);
+  float alpha_y = max(0.0001, roughness * roughness * aspect);
+  if (cos_nl > 0 && cos_nv > 0) {
+    vec3 h = normalize(v_in + v_out);
+    float cos_nh = clampdot(normal, h);
+    float cos_lh = clampdot(v_in, h);
+    float cos_xh = clampdot(x, h);
+    float cos_yh = clampdot(y, h);
+    // diffuse
+    f_diffuse = INV_PI * cos_nl;
+    // metal
+    D = 1 / (PI * alpha_x * alpha_y * pow2(pow2(cos_xh / alpha_x) + pow2(cos_yh / alpha_y) + cos_nh * cos_nh));
+    G = 1 / (cos_nl + sqrt(cos_nl * cos_nl + pow2(clampdot(v_in, x) * alpha_x) + pow2(clampdot(v_in, y) * alpha_y)));// *2*cos_nl
+    f_metal = D * G * 0.5;
+    // clearcoat
+    float alpha_g2 = pow2(mix(0.1, 0.001, clearcoat_gloss));
+    D = (alpha_g2 - 1) / (PI * log(alpha_g2) * (1 + (alpha_g2 - 1) * cos_nh * cos_nh));
+    f_clearcoat = D * abs(cos_nh) / abs(cos_lh) * 0.25;
+  }
+  vec3 h = -normalize(cos_nl > 0 ? v_in + eta * v_out : eta * v_in + v_out);
+  float cos_nh = clampdot(normal, h);
+  float cos_lh = clampdot(v_in, h);
+  float cos_vh = clampdot(v_out, h);
+  float cos_xh = clampdot(x, h);
+  float cos_yh = clampdot(y, h);
+  // glass
+  // float Fg = 0.5 * (pow2((cos_lh - eta * cos_vh) / (cos_lh + eta * cos_vh)) + pow2((eta * cos_lh - cos_vh) / (eta * cos_lh + cos_vh)));
+  float Fg = pow2(1 + eta) / pow2(1 - eta);
+  D = 1 / (PI * alpha_x * alpha_y * pow2(pow2(cos_xh / alpha_x) + pow2(cos_yh / alpha_y) + cos_nh * cos_nh));
+  G = abs(cos_nl) / (abs(cos_nl) + sqrt(cos_nl * cos_nl + pow2(clampdot(v_in, x) * alpha_x) + pow2(clampdot(v_in, y) * alpha_y)));// *2
+  f_glass = cos_nl * cos_nv > 0 ? Fg * D * G / abs(cos_nl) * 0.5
+                                : (1 - Fg) * D * G * abs(cos_lh * cos_vh) / (abs(cos_nl) * pow2(cos_lh + eta * cos_vh)) * 2.0;
+  // combine
+  float v_diffuse = (1 - specular_transmission) * (1 - metallic);
+  float v_metal = (1 - specular_transmission * (1 - metallic));
+  float v_clearcoat = 0.25 * clearcoat;
+  float v_glass = (1 - metallic) * specular_transmission;
+  
+  // v_diffuse = 0;
+  // v_clearcoat = 0;
+  // v_glass = 0;
+  // f_diffuse = 0.0;
+  // f_clearcoat = 0.0;
+  // f_glass = 0.0;
+
+  float f = v_diffuse * f_diffuse
+         + v_metal * f_metal
+         + v_clearcoat * f_clearcoat
+         + v_glass * f_glass;
+  return max(f / (v_diffuse + v_metal + v_clearcoat + v_glass), 0.000001);
+}
+
+float LS_pdf(vec3 origin, vec3 direction) {
+  // return 1.0;
   ObjectInfo object_info = object_infos[ray_payload.object_id];
   int num_faces = int(object_infos[ray_payload.object_id + 1].index_offset - object_infos[ray_payload.object_id].index_offset) / 3;
   Vertex v0 = GetVertex(
@@ -105,12 +411,16 @@ float MIS_weight(vec3 origin, vec3 direction) {
   vec3 p2 = v2.position;
   float a = length(cross(p1 - p0, p2 - p0)) * 0.5;
   float distance = length(hit_record.position - origin);
-  float pdf = distance * distance / abs(clamp(dot(hit_record.normal, -direction), -1, 1)) / a / num_faces;
-  float pdf2 = 0.5 / PI;
-  return pdf * pdf / (pdf * pdf + pdf2 * pdf2);
+  float pdf = distance * distance / abs(clampdot(hit_record.normal, -direction)) / a / num_faces;
+  return pdf;
 }
 
-vec3 LightSampling(vec3 origin, vec3 normal, vec3 old_direction) {
+float MIS_weight(float pdf1, float pdf2) {
+  // return 0.0;
+  return clamp(pdf1 * pdf1 / (pdf1 * pdf1 + pdf2 * pdf2), 0, 1);
+}
+
+vec3 LightSamplingLambertian(vec3 origin, vec3 normal, vec3 old_direction) {
   ObjectInfo object_info = object_infos[0];
   Material material_emission = materials[0];
   int num_faces = int(object_infos[1].index_offset - object_infos[0].index_offset) / 3;
@@ -135,13 +445,52 @@ vec3 LightSampling(vec3 origin, vec3 normal, vec3 old_direction) {
   if (dot(normal, direction) < 0) return vec3(0.0);
   TraceRay(origin, direction);
   if (ray_payload.object_id == 0 && ray_payload.primitive_id == random_index) {
+    float pdf1 = LS_pdf(origin, direction);
+    float pdf2 = INV_PI * 0.5;
     vec3 light = hit_record.emission * hit_record.emission_strength
                 * abs(dot(normal, direction))
                 * clamp(dot(hit_record.normal, -direction), -1, 1)
                 * a / (distance * distance) * num_faces
-                * (1 / (PI * 2))
-                * MIS_weight(origin, direction);
-    return light;
+                * pdf2
+                * MIS_weight(pdf1, pdf2);
+    return clamp(light, 0.0, 1.0);
+  } else return vec3(0.0);
+}
+
+vec3 LightSamplingBSDF(vec3 origin, vec3 normal, vec3 tangent, vec3 old_direction, vec3 color, Material material) {
+  ObjectInfo object_info = object_infos[0];
+  Material material_emission = materials[0];
+  int num_faces = int(object_infos[1].index_offset - object_infos[0].index_offset) / 3;
+  int random_index = int(RandomFloat() * num_faces);
+  Vertex v0 = GetVertex(object_info.vertex_offset + indices[object_info.index_offset + random_index * 3 + 0]);
+  Vertex v1 = GetVertex(object_info.vertex_offset + indices[object_info.index_offset + random_index * 3 + 1]);
+  Vertex v2 = GetVertex(object_info.vertex_offset + indices[object_info.index_offset + random_index * 3 + 2]);
+  vec3 p0 = v0.position;
+  vec3 p1 = v1.position;
+  vec3 p2 = v2.position;
+  float x_length = RandomFloat();
+  float y_length = RandomFloat();
+  if (x_length + y_length > 1) {
+    x_length = 1 - x_length;
+    y_length = 1 - y_length;
+  }
+  float a = length(cross(p1 - p0, p2 - p0)) * 0.5;
+  
+  vec3 random_position = p0 * (1 - x_length - y_length) + p1 * x_length + p2 * y_length;
+  float distance = length(random_position - origin);
+  vec3 direction = normalize(random_position - origin);
+  if (dot(normal, direction) < 0) return vec3(0.0);
+  TraceRay(origin, direction);
+  if (ray_payload.object_id == 0 && ray_payload.primitive_id == random_index) {
+    float pdf1 = LS_pdf(origin, direction);
+    float pdf2 = BSDFSampling_pdf(-old_direction, direction, normal, tangent, color, material);
+    vec3 light = hit_record.emission * hit_record.emission_strength
+                * abs(dot(normal, direction))
+                * clamp(dot(hit_record.normal, -direction), -1, 1)
+                * a / (distance * distance) * num_faces
+                * pdf2
+                * MIS_weight(pdf1, pdf2);
+    return clamp(light, 0.0, 1.0);
   } else return vec3(0.0);
 }
 
@@ -157,8 +506,12 @@ vec2 AntiAliasingSample(int sample_time) {
 vec3 SampleRay(vec3 origin, vec3 direction) {
   vec3 radiance = vec3(0.0);
   vec3 throughput = vec3(1.0);
+  vec3 old_direction = vec3(1.0, 0.0, 0.0);
+  vec3 normal = vec3(1.0, 0.0, 0.0);
+  vec3 color = vec3(0.0);
+  vec3 tangent = vec3(0.0, 1.0, 0.0);
   float RR_probability = 0.9;
-  uint previous_material = MATERIAL_TYPE_EMISSION;
+  Material previous_material;
   for (int b = 0; b <= guo.num_bounces; b++) {
     if (b >= guo.num_bounces || RandomFloat() > RR_probability) {
       throughput = vec3(0.0);
@@ -176,20 +529,22 @@ vec3 SampleRay(vec3 origin, vec3 direction) {
       Material material = materials[hit_record.hit_entity_id];
       if (material.material_type == MATERIAL_TYPE_EMISSION) {
         throughput *= material.emission * material.emission_strength;
-        // if (previous_material != MATERIAL_TYPE_LAMBERTIAN) radiance += throughput;
-        // else radiance += throughput * (1 - MIS_weight(origin, direction));
+        if (previous_material.material_type == MATERIAL_TYPE_LAMBERTIAN) radiance += throughput * (1 - MIS_weight(LS_pdf(origin, direction), 0.5 * INV_PI));
+        else if (previous_material.material_type == MATERIAL_TYPE_PRINCIPLED) radiance += throughput * (1 - MIS_weight(LS_pdf(origin, direction), BSDFSampling_pdf(-old_direction, direction, normal, tangent, color, previous_material)));
+        else radiance += throughput;
         radiance += throughput;
         break;
       } else {
-        throughput *= material.albedo_color *
+        color = material.albedo_color *
                       vec3(texture(texture_samplers[material.albedo_texture_id],
                                    hit_record.tex_coord));
-        previous_material = material.material_type;
+        throughput *= color;
+        previous_material = material;
         origin = hit_record.position;
-        vec3 old_direction = direction;
-        vec3 normal = hit_record.normal;
+        old_direction = direction;
+        normal = hit_record.normal;
         if (material.material_type == MATERIAL_TYPE_TRANSMISSIVE) {
-          float inv_refraction_rate = DEFAULT_REFRACTION_RATE;
+          float inv_refraction_rate = material.refraction_rate;
           float theta1 = dot(normal, old_direction);
           if (theta1 < 0) inv_refraction_rate = 1 / inv_refraction_rate;
           vec3 direction1 = old_direction - 2 * dot(normal, old_direction) * normal;
@@ -204,7 +559,7 @@ vec3 SampleRay(vec3 origin, vec3 direction) {
             direction2 = normalize(cos_theta2 * component1 + theta2 * component2);
             float r0 = (1 - inv_refraction_rate) / (1 + inv_refraction_rate);
             r0 = r0 * r0;
-            float reflectance = r0 + (1 - r0) * pow(1 - abs(dot(old_direction, normal)), 5);
+            float reflectance = r0 + (1 - r0) * pow5(1 - abs(dot(old_direction, normal)));
             if (RandomFloat() < reflectance){
               direction = direction1;
             } else {
@@ -214,9 +569,15 @@ vec3 SampleRay(vec3 origin, vec3 direction) {
         } else if (material.material_type == MATERIAL_TYPE_SPECULAR) {
           direction = old_direction - 2 * dot(normal, old_direction) * normal;
         } else if (material.material_type == MATERIAL_TYPE_LAMBERTIAN) {
-          // radiance += LightSampling(origin, normal, old_direction) * throughput;
+          radiance += LightSamplingLambertian(origin, normal, old_direction) * throughput;
           if (dot(normal, old_direction) < 0) direction = RandomDirectionLambertian(normal);
           else direction = RandomDirectionLambertian(-normal);
+        } else if (material.material_type == MATERIAL_TYPE_PRINCIPLED) {
+          tangent = hit_record.tangent;
+          radiance += LightSamplingBSDF(origin, normal, tangent, old_direction, color, material) * throughput;
+          direction = RandomDirectionBSDF(-old_direction, normal, tangent, color, material);
+          throughput *= BSDF(-old_direction, direction, normal, tangent, color, material)
+                      / BSDFSampling_pdf(-old_direction, direction, normal, tangent, color, material);
         } else {
           direction = old_direction;
         }

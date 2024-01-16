@@ -332,6 +332,10 @@ Mesh::Mesh(const tinyxml2::XMLElement *element) {
       if (attribute) {
         vertex.tex_coord = StringToVec2(attribute->Value());
       }
+      attribute = vertex_element->FindAttribute("tangent");
+      if (attribute) {
+        vertex.tangent = StringToVec3(attribute->Value());
+      }
       vertices.push_back(vertex);
     }
 

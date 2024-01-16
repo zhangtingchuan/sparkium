@@ -72,6 +72,62 @@ Material::Material(Scene *scene, const tinyxml2::XMLElement *material_element)
   if (child_element) {
     refraction_rate = std::stof(child_element->FindAttribute("value")->Value());
   }
+
+  child_element = material_element->FirstChildElement("anisotrophic");
+  if (child_element) {
+    anisotrophic = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
+  child_element = material_element->FirstChildElement("clearcoat");
+  if (child_element) {
+    clearcoat = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
+  child_element = material_element->FirstChildElement("clearcoat_gloss");
+  if (child_element) {
+    clearcoat_gloss = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
+  child_element = material_element->FirstChildElement("metallic");
+  if (child_element) {
+    metallic = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
+  child_element = material_element->FirstChildElement("roughness");
+  if (child_element) {
+    roughness = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
+  child_element = material_element->FirstChildElement("sheen");
+  if (child_element) {
+    sheen = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
+  child_element = material_element->FirstChildElement("sheen_tint");
+  if (child_element) {
+    sheen_tint = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
+  child_element = material_element->FirstChildElement("specular");
+  if (child_element) {
+    specular = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
+  child_element = material_element->FirstChildElement("specular_tint");
+  if (child_element) {
+    specular_tint = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
+  child_element = material_element->FirstChildElement("specular_transmission");
+  if (child_element) {
+    specular_transmission = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
+  child_element = material_element->FirstChildElement("subsurface");
+  if (child_element) {
+    subsurface = std::stof(child_element->FindAttribute("value")->Value());
+  }
+
 }
 
 Material::Material(const glm::vec3 &albedo) : Material() {

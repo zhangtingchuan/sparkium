@@ -2,11 +2,13 @@
 <scene>
     <camera>
         <transform type="lookat">
-            <eye value="278 273 -800"/>
-            <center value="278 273 0"/>
+            <eye value="500 460 100"/>
+            <center value="300 230 300"/>
             <up value="0.0 1.0 0.0"/>
         </transform>
         <fov value="40"/>
+        <aperture value="0.2"/>
+        <focal_length value="125"/>
         <speed value="100"/>
     </camera>
 
@@ -31,10 +33,10 @@
 
     <!--floor-->
     <model name="Floor">
-        <vertex position="552.8 0.0   0.0"/>
-        <vertex position="0.0 0.0   0.0"/>
-        <vertex position="0.0 0.0 559.2"/>
-        <vertex position="549.6 0.0 559.2"/>
+        <vertex position="552.8 0.0   0.0" tex_coord="1.0 0.0"/>
+        <vertex position="0.0 0.0   0.0" tex_coord="0.0 0.0"/>
+        <vertex position="0.0 0.0 559.2" tex_coord="0.0 1.0"/>
+        <vertex position="549.6 0.0 559.2" tex_coord="1.0 1.0"/>
         <index value="0"/>
         <index value="1"/>
         <index value="3"/>
@@ -43,7 +45,9 @@
         <index value="2"/>
 
         <material type="lambertian">
-            <albedo value="0.8 0.8 0.8"/>
+            <albedo value="1.0 1.0 1.0"/>
+            <albedo_texture value="../../textures/ground1.png"/>
+            <normal_texture value="../../textures/normal1.png"/>
         </material>
     </model>
 
@@ -97,7 +101,7 @@
         <index value="2"/>
 
         <material type="lambertian">
-            <albedo value="0.0 0.8 0.0"/>
+            <albedo value="0.4 0.8 0.8"/>
         </material>
     </model>
 
@@ -115,133 +119,69 @@
         <index value="2"/>
 
         <material type="lambertian">
-            <albedo value="0.8 0.0 0.0"/>
+            <albedo value="0.8 0.8 0.8"/>
         </material>
     </model>
 
-    <!--short block-->
-    <model name="Short Block">
-        <vertex position="130.0 165.0  65.0"/>
-        <vertex position="82.0 165.0 225.0"/>
-        <vertex position="240.0 165.0 272.0"/>
-        <vertex position="290.0 165.0 114.0"/>
+    <model type="obj" name="Dragon">
+        <filename value="../../meshes/dragon.obj"/>
+        <transform type="world">
+            <scale value="1000 1000 1000"/>
+            <translation value="230 -30 280"/>
+            <rotation value="-174 45 -180"/>
+        </transform>
 
-        <vertex position="290.0   0.0 114.0"/>
-        <vertex position="290.0 165.0 114.0"/>
-        <vertex position="240.0 165.0 272.0"/>
-        <vertex position="240.0   0.0 272.0"/>
+        <material type="principled">
+            <albedo value="0.8 0.7 0.2"/>
+            <anisotrophic value="0.6"/>
+            <clearcoat value="0.0"/>
+            <clearcoat_gloss value="0.0"/>
+            <metallic value="0.8"/>
+            <roughness value="0.2"/>
+            <sheen value="0.0"/>
+            <sheen_tint value="0.0"/>
+            <specular value="0.0"/>
+            <specular_tint value="0.0"/>
+            <specular_transmission value="0.0"/>
+            <subsurface value="0.0"/>
+        </material>
+    </model>
 
-        <vertex position="130.0   0.0  65.0"/>
-        <vertex position="130.0 165.0  65.0"/>
-        <vertex position="290.0 165.0 114.0"/>
-        <vertex position="290.0   0.0 114.0"/>
+    
+    <model type="obj" name="Bunny">
+        <filename value="../../meshes/bunny.obj"/>
+        <transform type="world">
+            <scale value="300 300 300"/>
+            <translation value="283 244 345"/>
+            <rotation value="-174 -10 -180"/>
+        </transform>
 
-        <vertex position="82.0   0.0 225.0"/>
-        <vertex position="82.0 165.0 225.0"/>
-        <vertex position="130.0 165.0  65.0"/>
-        <vertex position="130.0   0.0  65.0"/>
+        <material type="principled">
+            <albedo value="1 0.5 0.75"/>
+            <anisotrophic value="0.0"/>
+            <clearcoat value="0.0"/>
+            <clearcoat_gloss value="0.0"/>
+            <metallic value="0.3"/>
+            <roughness value="1.0"/>
+            <sheen value="0.0"/>
+            <sheen_tint value="0.0"/>
+            <specular value="0.0"/>
+            <specular_tint value="0.0"/>
+            <specular_transmission value="0.0"/>
+            <subsurface value="0.0"/>
+        </material>
+    </model>
 
-        <vertex position="240.0   0.0 272.0"/>
-        <vertex position="240.0 165.0 272.0"/>
-        <vertex position=" 82.0 165.0 225.0"/>
-        <vertex position="82.0   0.0 225.0"/>
+    <model type="sphere">
+        <center value="0.0 0.0 0.0"/>
+        <radius value="50.0"/>
 
-        <index value="0"/>
-        <index value="1"/>
-        <index value="3"/>
-        <index value="1"/>
-        <index value="3"/>
-        <index value="2"/>
-        <index value="4"/>
-        <index value="5"/>
-        <index value="7"/>
-        <index value="5"/>
-        <index value="7"/>
-        <index value="6"/>
-        <index value="8"/>
-        <index value="9"/>
-        <index value="11"/>
-        <index value="9"/>
-        <index value="11"/>
-        <index value="10"/>
-        <index value="12"/>
-        <index value="13"/>
-        <index value="15"/>
-        <index value="13"/>
-        <index value="15"/>
-        <index value="14"/>
-        <index value="16"/>
-        <index value="17"/>
-        <index value="19"/>
-        <index value="17"/>
-        <index value="19"/>
-        <index value="18"/>
+        <transform type="translate" value="280.0 200.0 340.0"/>
 
         <material type="lambertian">
             <albedo value="1 1 1"/>
-        </material>
-    </model>
-
-    <!--tall block-->
-    <model name="Tall Block">
-        <vertex position="423.0 330.0 247.0"/>
-        <vertex position="265.0 330.0 296.0"/>
-        <vertex position="314.0 330.0 456.0"/>
-        <vertex position="472.0 330.0 406.0"/>
-
-        <vertex position="423.0   0.0 247.0"/>
-        <vertex position="423.0 330.0 247.0"/>
-        <vertex position="472.0 330.0 406.0"/>
-        <vertex position="472.0   0.0 406.0"/>
-
-        <vertex position="472.0   0.0 406.0"/>
-        <vertex position="472.0 330.0 406.0"/>
-        <vertex position="314.0 330.0 456.0"/>
-        <vertex position="314.0   0.0 456.0"/>
-
-        <vertex position="314.0   0.0 456.0"/>
-        <vertex position="314.0 330.0 456.0"/>
-        <vertex position="265.0 330.0 296.0"/>
-        <vertex position="265.0   0.0 296.0"/>
-
-        <vertex position="265.0   0.0 296.0"/>
-        <vertex position="265.0 330.0 296.0"/>
-        <vertex position="423.0 330.0 247.0"/>
-        <vertex position="423.0   0.0 247.0"/>
-
-        <index value="0"/>
-        <index value="1"/>
-        <index value="3"/>
-        <index value="1"/>
-        <index value="3"/>
-        <index value="2"/>
-        <index value="4"/>
-        <index value="5"/>
-        <index value="7"/>
-        <index value="5"/>
-        <index value="7"/>
-        <index value="6"/>
-        <index value="8"/>
-        <index value="9"/>
-        <index value="11"/>
-        <index value="9"/>
-        <index value="11"/>
-        <index value="10"/>
-        <index value="12"/>
-        <index value="13"/>
-        <index value="15"/>
-        <index value="13"/>
-        <index value="15"/>
-        <index value="14"/>
-        <index value="16"/>
-        <index value="17"/>
-        <index value="19"/>
-        <index value="17"/>
-        <index value="19"/>
-        <index value="18"/>
-
-        <material type="transmissive">
-            <albedo value="1 1 1"/>
+            <albedo_texture value="../../textures/earth.jpg"/>
+            <normal_texture value="../../textures/earth_normal.jpg"/>
         </material>
     </model>
 
