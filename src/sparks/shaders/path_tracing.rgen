@@ -594,10 +594,9 @@ vec3 SampleRay(vec3 origin, vec3 direction) {
   return radiance;
 }
 
-// TODO
-// principled bsdf
-// functional texture mapping
-// motion blur
+vec2 aperture_sample() {
+  return RandomInCircle() * guo.aperture;
+}
 
 void main() {
   const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
@@ -611,7 +610,7 @@ void main() {
     InitRandomSeed(uint(pixelCenter.x), uint(pixelCenter.y),
                    guo.accumulated_sample + i);
     vec2 d0 = d + AntiAliasingSample(i) / vec2(gl_LaunchSizeEXT.xy);
-    vec4 origin_camera = vec4(RandomInCircle() * guo.aperture, 0, 1);
+    vec4 origin_camera = vec4(aperture_sample(), 0, 1);
     vec4 origin = camera_to_world * origin_camera;
     vec4 target = screen_to_camera * vec4(vec3(d0.x, d0.y, 1), 1) * guo.focal_length;
     vec4 direction = camera_to_world * vec4(normalize(target.xyz - origin_camera.xyz), 0);
